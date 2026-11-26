@@ -30,7 +30,9 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Gunakan metode POST.' });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const useGemini = Boolean(process.env.GEMINI_API_KEY);
+  const apiKey = useGemini ? process.env.GEMINI_API_KEY : process.env.OPENAI_API_KEY;
+  const providerName = useGemini ? 'Gemini' : 'OpenAI';
   if (!apiKey) {
     return res.status(500).json({ error: 'Layanan AI belum dikonfigurasi di server.' });
   }
@@ -55,24 +57,35 @@ export default async function handler(req, res) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 28_000);
   try {
-    const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
+    const endpoint = useGemini
+      ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+      : 'https://api.openai.com/v1/chat/completions';
+    const payload = useGemini
+      ? {
+          model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
+          messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+          max_tokens: 1500,
+          reasoning_effort: 'low'
+        }
+      : {
+          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+          messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+          max_completion_tokens: 800
+        };
+    const upstream = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
-        max_completion_tokens: 800
-      }),
+      body: JSON.stringify(payload),
       signal: controller.signal
     });
     const data = await upstream.json().catch(() => ({}));
     if (!upstream.ok) {
-      console.error('OpenAI error', upstream.status, JSON.stringify(data).slice(0, 500));
+      console.error(`${providerName} error`, upstream.status, JSON.stringify(data).slice(0, 500));
       const msg = upstream.status === 429
-        ? 'Kuota/batas permintaan OpenAI tercapai. Coba lagi nanti.'
+        ? `Kuota/batas permintaan ${providerName} tercapai. Coba lagi nanti.`
         : 'Layanan AI sedang bermasalah. Coba lagi nanti.';
       return res.status(502).json({ error: msg });
     }

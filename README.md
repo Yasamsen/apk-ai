@@ -71,3 +71,8 @@ Environment Variables Vercel tambahan:
 - `AI_ENDPOINT` (opsional) = URL penuh endpoint, misalnya `https://domain-kamu.vercel.app/api/chat`. Jika kosong, alamatnya diambil dari domain yang dipakai saat menekan Mulai Build. Buka website lewat domain production, bukan URL preview, dan matikan Deployment Protection untuk `/api/chat`, atau APK tidak bisa menghubungi server.
 
 Catatan keamanan dan biaya: siapa pun yang memasang APK bisa memakai endpoint ini dan memakai kuota OpenAI kamu. Rate limit bawaan (15 permintaan/menit/IP) hanya best-effort karena memori serverless tidak dibagi antar instance. Atur batas pengeluaran di dashboard OpenAI. Jika APK akan disebar luas, tambahkan autentikasi atau rate limit permanen (misalnya Upstash/Vercel KV).
+
+### Pakai Gemini (alternatif OpenAI)
+Jika `GEMINI_API_KEY` diisi di Environment Variables Vercel, `/api/chat` otomatis memakai Gemini (endpoint kompatibel OpenAI) dan mengabaikan `OPENAI_API_KEY`.
+- `GEMINI_API_KEY` = API key dari https://aistudio.google.com/apikey
+- `GEMINI_MODEL` (opsional) = nama model, bawaan `gemini-flash-latest`.

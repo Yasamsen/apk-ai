@@ -47,8 +47,8 @@ export default async function handler(req, res) {
 
   let aiEndpoint = '';
   if (aiEnabled) {
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(400).json({ error: 'Asisten AI aktif, tetapi OPENAI_API_KEY belum diatur di Environment Variables Vercel.' });
+    if (!process.env.GEMINI_API_KEY && !process.env.OPENAI_API_KEY) {
+      return res.status(400).json({ error: 'Asisten AI aktif, tetapi GEMINI_API_KEY (atau OPENAI_API_KEY) belum diatur di Environment Variables Vercel.' });
     }
     aiEndpoint = process.env.AI_ENDPOINT || '';
     if (!aiEndpoint) {
