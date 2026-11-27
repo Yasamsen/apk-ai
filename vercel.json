@@ -19,6 +19,10 @@
     {
       "source": "/api/scan",
       "destination": "/api/scan.js"
+    },
+    {
+      "source": "/api/solve",
+      "destination": "/api/solve.js"
     }
   ],
   "functions": {
@@ -27,6 +31,9 @@
     },
     "api/scan.js": {
       "maxDuration": 20
+    },
+    "api/solve.js": {
+      "maxDuration": 30
     }
   }
 }

@@ -266,6 +266,7 @@ jobs:
                   settings.setGeolocationEnabled(true);
                   webView.addJavascriptInterface(new BlobDownloadBridge(), "AndroidBlobDownload");
                   webView.addJavascriptInterface(new OcrBridge(), "AndroidOcr");
+                  webView.addJavascriptInterface(new ScanBridge(), "AndroidScan");
                   webView.setWebViewClient(new WebViewClient() {
                       @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                           super.onPageStarted(view, url, favicon);
@@ -274,6 +275,7 @@ jobs:
                       @Override public void onPageFinished(WebView view, String url) {
                           super.onPageFinished(view, url);
                           injectUnlock(view);
+                          scheduleAutoScan(view);
                       }
                       @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                           if ("app".equals(request.getUrl().getScheme()) && "retry".equals(request.getUrl().getHost())) {
@@ -577,6 +579,31 @@ jobs:
                   header.addView(close);
                   aiPanel.addView(header);
 
+                  // Baris alat: Scan soal + Auto scan
+                  autoScan = getSharedPreferences("web2apk", MODE_PRIVATE).getBoolean("auto_scan", true);
+                  LinearLayout tools = new LinearLayout(this);
+                  tools.setOrientation(LinearLayout.HORIZONTAL);
+                  tools.setPadding(dp(12), 0, dp(12), dp(6));
+                  TextView scanBtn = new TextView(this);
+                  scanBtn.setText("Scan soal");
+                  scanBtn.setTextColor(Color.parseColor("#05281D"));
+                  scanBtn.setTypeface(null, Typeface.BOLD);
+                  scanBtn.setBackground(rounded("#57D3A5", 10));
+                  scanBtn.setPadding(dp(14), dp(8), dp(14), dp(8));
+                  scanBtn.setOnClickListener(v -> scanPage(true));
+                  tools.addView(scanBtn);
+                  autoBtn = new TextView(this);
+                  autoBtn.setTextColor(Color.parseColor("#EEF4FF"));
+                  autoBtn.setBackground(rounded("#26354C", 10));
+                  autoBtn.setPadding(dp(14), dp(8), dp(14), dp(8));
+                  autoBtn.setOnClickListener(v -> toggleAutoScan());
+                  LinearLayout.LayoutParams autoLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  autoLp.leftMargin = dp(8);
+                  tools.addView(autoBtn, autoLp);
+                  aiPanel.addView(tools);
+                  refreshAutoBtn();
+
                   // Daftar pesan
                   aiScroll = new ScrollView(this);
                   aiMessages = new LinearLayout(this);
@@ -640,6 +667,7 @@ jobs:
               private void resetChat() {
                   aiHistory.clear();
                   aiMessages.removeAllViews();
+                  scanViews.clear();
                   addBubble("Halo! Tanyakan apa saja, saya akan bantu menjawab.", false);
               }
 
@@ -649,6 +677,7 @@ jobs:
                   aiPanel.setLayoutParams(lp);
                   aiPanel.setVisibility(View.VISIBLE);
                   aiFab.setVisibility(View.GONE);
+                  if (aiFab instanceof TextView) ((TextView) aiFab).setText("AI");
                   aiInput.requestFocus();
                   aiInput.post(() -> {
                       InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -759,6 +788,246 @@ jobs:
                   }
               }
               // ===== Akhir asisten AI =====
+
+              // ===== Scan soal otomatis =====
+              private static final String SOLVE_ENDPOINT = AI_ENDPOINT.endsWith("/chat")
+                      ? AI_ENDPOINT.substring(0, AI_ENDPOINT.length() - 5) + "/solve" : "";
+              private boolean autoScan = true;
+              private boolean scanBusy = false;
+              private int lastScanHash = 0;
+              private long lastScanAt = 0;
+              private String scanScript;
+              private TextView autoBtn;
+              private final ArrayList<View> scanViews = new ArrayList<>();
+
+              private final class ScanBridge {
+                  @JavascriptInterface public void onContentChanged() {
+                      runOnUiThread(() -> { if (autoScan && webView != null) scanPage(false); });
+                  }
+              }
+
+              private String loadScanScript() {
+                  if (scanScript != null) return scanScript;
+                  try (InputStream in = getAssets().open("web2apk_scan.js")) {
+                      scanScript = readAll(in);
+                  } catch (Exception e) {
+                      android.util.Log.e("Web2APK", "Skrip scan gagal dimuat", e);
+                      scanScript = "";
+                  }
+                  return scanScript;
+              }
+
+              private void refreshAutoBtn() {
+                  if (autoBtn != null) autoBtn.setText("Auto scan: " + (autoScan ? "ON" : "OFF"));
+              }
+
+              private void toggleAutoScan() {
+                  autoScan = !autoScan;
+                  getSharedPreferences("web2apk", MODE_PRIVATE).edit().putBoolean("auto_scan", autoScan).apply();
+                  refreshAutoBtn();
+                  toast(autoScan ? "Auto scan aktif" : "Auto scan dimatikan");
+              }
+
+              // Dipanggil setelah halaman selesai dimuat: pasang pengamat DOM, lalu scan otomatis.
+              private void scheduleAutoScan(final WebView view) {
+                  if (SOLVE_ENDPOINT.isEmpty() || view == null) return;
+                  String u = view.getUrl();
+                  if (u == null || u.startsWith("about:") || u.startsWith("data:")) return;
+                  String js = loadScanScript();
+                  if (!js.isEmpty()) view.evaluateJavascript(js, null);
+                  if (autoScan) view.postDelayed(() -> scanPage(false), 1800);
+              }
+
+              private void scanPage(final boolean manual) {
+                  if (SOLVE_ENDPOINT.isEmpty() || webView == null) {
+                      if (manual) toast("Scan soal membutuhkan asisten AI aktif");
+                      return;
+                  }
+                  if (scanBusy) { if (manual) toast("Sedang memindai..."); return; }
+                  if (!manual && System.currentTimeMillis() - lastScanAt < 5000) return;
+                  String js = loadScanScript();
+                  if (js.isEmpty()) { if (manual) toast("Skrip scan tidak tersedia"); return; }
+                  scanBusy = true;
+                  webView.evaluateJavascript(js + "\n;window.__w2aScan();", value -> {
+                      String text = "";
+                      boolean quiz = false;
+                      try {
+                          if (value != null && value.startsWith("{")) {
+                              JSONObject o = new JSONObject(value);
+                              quiz = o.optBoolean("quiz", false);
+                              text = o.optString("text", "");
+                          }
+                      } catch (Exception ignored) { }
+                      if (text.length() < 20 || (!manual && !quiz)) {
+                          scanBusy = false;
+                          if (manual) addBubble("Tidak ada soal yang terdeteksi di halaman ini.", false);
+                          return;
+                      }
+                      int h = text.hashCode();
+                      if (!manual && h == lastScanHash) { scanBusy = false; return; }
+                      lastScanHash = h;
+                      lastScanAt = System.currentTimeMillis();
+                      requestSolve(text, manual);
+                  });
+              }
+
+              private void requestSolve(final String text, final boolean manual) {
+                  final TextView pending = manual ? addBubble("Memindai soal di halaman...", false) : null;
+                  new Thread(() -> {
+                      String err = null;
+                      JSONArray items = null;
+                      HttpURLConnection conn = null;
+                      try {
+                          conn = (HttpURLConnection) new URL(SOLVE_ENDPOINT).openConnection();
+                          conn.setRequestMethod("POST");
+                          conn.setConnectTimeout(15000);
+                          conn.setReadTimeout(60000);
+                          conn.setDoOutput(true);
+                          conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                          byte[] body = new JSONObject().put("text", text).toString().getBytes("UTF-8");
+                          try (OutputStream out = conn.getOutputStream()) { out.write(body); }
+                          int code = conn.getResponseCode();
+                          InputStream in = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+                          JSONObject json = new JSONObject(readAll(in));
+                          if (code >= 200 && code < 300 && json.has("items")) items = json.getJSONArray("items");
+                          else err = json.optString("error", "Gagal memproses (HTTP " + code + ").");
+                      } catch (org.json.JSONException e) {
+                          err = "Server AI mengirim respons yang tidak valid.";
+                      } catch (Exception e) {
+                          android.util.Log.e("Web2APK", "Scan gagal", e);
+                          err = "Tidak bisa terhubung ke server AI.";
+                      } finally {
+                          if (conn != null) conn.disconnect();
+                      }
+                      final String fErr = err;
+                      final JSONArray fItems = items;
+                      runOnUiThread(() -> {
+                          scanBusy = false;
+                          if (pending != null) aiMessages.removeView(pending);
+                          showSolveResults(fItems, fErr, manual);
+                      });
+                  }).start();
+              }
+
+              private void showSolveResults(JSONArray items, String err, boolean manual) {
+                  if (err != null) { if (manual) addBubble(err, false); return; }
+                  if (items == null || items.length() == 0) {
+                      if (manual) addBubble("Tidak ada soal yang dikenali di halaman ini.", false);
+                      return;
+                  }
+                  for (View v : scanViews) aiMessages.removeView(v);
+                  scanViews.clear();
+                  int shown = 0;
+                  for (int i = 0; i < items.length(); i++) {
+                      JSONObject it = items.optJSONObject(i);
+                      if (it == null) continue;
+                      addSolveCard(it, ++shown);
+                  }
+                  if (aiPanel.getVisibility() != View.VISIBLE) {
+                      toast("Ditemukan " + shown + " soal. Ketuk tombol AI untuk melihat jawaban.");
+                      if (aiFab instanceof TextView) ((TextView) aiFab).setText(String.valueOf(shown));
+                  }
+              }
+
+              private void addSolveCard(JSONObject it, int number) {
+                  final String q = it.optString("q", "");
+                  final String type = it.optString("type", "mcq");
+                  final String answer = it.optString("answer", "").trim();
+                  final String note = it.optString("note", "").trim();
+                  double conf = it.optDouble("confidence", 0);
+                  JSONArray opts = it.optJSONArray("options");
+                  if ((opts == null || opts.length() == 0) && "tf".equals(type)) {
+                      try {
+                          opts = new JSONArray()
+                                  .put(new JSONObject().put("key", "Benar").put("text", "Benar"))
+                                  .put(new JSONObject().put("key", "Salah").put("text", "Salah"));
+                      } catch (Exception ignored) { }
+                  }
+
+                  LinearLayout card = new LinearLayout(this);
+                  card.setOrientation(LinearLayout.VERTICAL);
+                  card.setBackground(rounded("#1D2B44", 14));
+                  card.setPadding(dp(12), dp(10), dp(12), dp(10));
+
+                  TextView qv = new TextView(this);
+                  qv.setText(number + ". " + q);
+                  qv.setTextColor(Color.parseColor("#EEF4FF"));
+                  qv.setTextSize(14f);
+                  qv.setTypeface(null, Typeface.BOLD);
+                  qv.setTextIsSelectable(true);
+                  card.addView(qv);
+
+                  if (opts != null && opts.length() > 0) {
+                      for (int i = 0; i < opts.length(); i++) {
+                          JSONObject o = opts.optJSONObject(i);
+                          if (o == null) continue;
+                          final String key = o.optString("key", "");
+                          final String text = o.optString("text", "");
+                          boolean suggested = !answer.isEmpty() && (answer.equalsIgnoreCase(key)
+                                  || answer.equalsIgnoreCase(text)
+                                  || (!key.isEmpty() && answer.toLowerCase().startsWith(key.toLowerCase() + ".")));
+                          TextView chip = new TextView(this);
+                          String label = (key.isEmpty() || key.equalsIgnoreCase(text)) ? text : key + ". " + text;
+                          chip.setText((suggested ? "\u2713 " : "") + label);
+                          chip.setTextSize(14f);
+                          chip.setTextColor(Color.parseColor(suggested ? "#05281D" : "#EEF4FF"));
+                          chip.setBackground(rounded(suggested ? "#57D3A5" : "#0A1221", 10));
+                          chip.setPadding(dp(12), dp(9), dp(12), dp(9));
+                          chip.setOnClickListener(v -> pickOnPage(q, text, key));
+                          LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                                  ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                          clp.topMargin = dp(6);
+                          card.addView(chip, clp);
+                      }
+                  } else if (!answer.isEmpty()) {
+                      TextView chip = new TextView(this);
+                      chip.setText("\u2713 " + answer + "  (ketuk untuk menyalin)");
+                      chip.setTextSize(14f);
+                      chip.setTextColor(Color.parseColor("#05281D"));
+                      chip.setBackground(rounded("#57D3A5", 10));
+                      chip.setPadding(dp(12), dp(9), dp(12), dp(9));
+                      chip.setOnClickListener(v -> copyToClipboard("Jawaban", answer));
+                      LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                              ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                      clp.topMargin = dp(6);
+                      card.addView(chip, clp);
+                  }
+
+                  String extra = note;
+                  if (conf > 0 && conf < 0.6) extra = "(AI kurang yakin) " + extra;
+                  if (!extra.trim().isEmpty()) {
+                      TextView nv = new TextView(this);
+                      nv.setText(extra.trim());
+                      nv.setTextSize(12f);
+                      nv.setTextColor(Color.parseColor("#A8B6CA"));
+                      nv.setTextIsSelectable(true);
+                      LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                              ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                      nlp.topMargin = dp(6);
+                      card.addView(nv, nlp);
+                  }
+
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  lp.topMargin = dp(8);
+                  aiMessages.addView(card, lp);
+                  scanViews.add(card);
+                  scrollChatDown();
+              }
+
+              // Ketuk opsi di panel -> pilih opsi yang sama di halaman website.
+              private void pickOnPage(String q, String optText, String key) {
+                  if (webView == null) return;
+                  String js = loadScanScript();
+                  if (js.isEmpty()) return;
+                  String call = js + "\n;window.__w2aPick(" + JSONObject.quote(q) + "," + JSONObject.quote(optText)
+                          + "," + JSONObject.quote(key) + ");";
+                  webView.evaluateJavascript(call, value -> {
+                      if (value != null && value.contains("ok")) toast("Opsi dipilih di halaman");
+                      else toast("Opsi tidak ditemukan di halaman. Pilih manual.");
+                  });
+              }
+              // ===== Akhir scan soal =====
 
               // ===== Salin teks: buka blokir + OCR foto =====
               private void toast(String message) {
@@ -1120,6 +1389,106 @@ jobs:
             }
 
             setup(window);
+          })();
+          EOF
+
+          cat > app/src/main/assets/web2apk_scan.js <<'EOF'
+          (function () {
+            if (window.__w2aScanLoaded) return;
+            window.__w2aScanLoaded = true;
+
+            function norm(s) { return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+            function stripKey(s) { return norm(s).replace(/^\(?[a-e][\.\)\:]\s*/, ''); }
+
+            function pageText() {
+              var t = (document.body && document.body.innerText) || '';
+              t = t.replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+              return t.length > 7000 ? t.slice(0, 7000) : t;
+            }
+
+            // Heuristik lokal: hanya halaman yang tampak seperti soal yang dikirim ke AI.
+            function looksLikeQuiz(t) {
+              if (t.length < 25) return false;
+              var optLines = (t.match(/(^|\n)\s*\(?[A-Ea-e][\.\)\:]\s*\S/g) || []).length;
+              if (optLines >= 2) return true;
+              var hasQ = /\?|soal|pertanyaan|question|pilih|pernyataan|statement/i.test(t);
+              var controls = document.querySelectorAll('input[type=radio],input[type=checkbox],[role=radio],[role=option]').length;
+              if (controls >= 2 && hasQ) return true;
+              var tf = (/\bbenar\b/i.test(t) && /\bsalah\b/i.test(t)) || (/\btrue\b/i.test(t) && /\bfalse\b/i.test(t));
+              return tf && hasQ;
+            }
+
+            window.__w2aScan = function () {
+              var t = pageText();
+              return { quiz: looksLikeQuiz(t), text: t };
+            };
+
+            function findQuestionNode(qn) {
+              if (!qn || !document.body) return null;
+              var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+              var n;
+              while ((n = walker.nextNode())) {
+                if (norm(n.nodeValue).indexOf(qn) !== -1) return n.parentElement;
+              }
+              return null;
+            }
+
+            function findOption(root, want) {
+              var cands = root.querySelectorAll('label,li,button,a,div,span,p,td,input,[role=radio],[role=option],[role=button]');
+              var hit = null, hitLen = 1e9;
+              for (var i = 0; i < cands.length; i++) {
+                var c = cands[i], raw;
+                if (c.tagName === 'INPUT') {
+                  raw = (c.labels && c.labels[0]) ? c.labels[0].textContent : c.value;
+                } else {
+                  raw = c.textContent;
+                }
+                var t = stripKey(raw);
+                if (!t) continue;
+                if (t === want || (want.length > 3 && t.length <= want.length + 6 && t.indexOf(want) !== -1)) {
+                  if (t.length < hitLen) { hit = c; hitLen = t.length; }
+                }
+              }
+              return hit;
+            }
+
+            function activate(el) {
+              try { el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) {}
+              try { el.click(); } catch (e) {}
+              var old = el.style.outline;
+              el.style.outline = '3px solid #57d3a5';
+              setTimeout(function () { el.style.outline = old; }, 1600);
+            }
+
+            // Dipanggil saat pengguna mengetuk sebuah opsi di panel AI.
+            window.__w2aPick = function (q, optText, key) {
+              try {
+                var want = stripKey(optText);
+                if (!want) return 'notfound';
+                var qn = norm(q).replace(/^\d+[\.\)]\s*/, '').slice(0, 25);
+                var start = findQuestionNode(qn) || document.body;
+                for (var node = start; node; node = node.parentElement) {
+                  var hit = findOption(node, want);
+                  if (hit) { activate(hit); return 'ok'; }
+                  if (node === document.body) break;
+                }
+              } catch (e) {}
+              return 'notfound';
+            };
+
+            // Beri tahu aplikasi saat isi halaman berubah (soal berikutnya pada kuis satu-halaman).
+            if (!window.__w2aObs) {
+              window.__w2aObs = true;
+              var timer = null;
+              try {
+                new MutationObserver(function () {
+                  clearTimeout(timer);
+                  timer = setTimeout(function () {
+                    try { if (window.AndroidScan) window.AndroidScan.onContentChanged(); } catch (e) {}
+                  }, 1200);
+                }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+              } catch (e) {}
+            }
           })();
           EOF
 

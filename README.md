@@ -98,3 +98,13 @@ Catatan:
 
 ## Watermark developer di dalam APK
 Setiap APK hasil build menampilkan label kecil semi-transparan "Dev: Yasam | WA 6281519986005" di pojok kanan bawah (tidak menghalangi sentuhan ke website), serta kredit dengan link WhatsApp di halaman offline. Teks dapat diubah pada konstanta `DEV_CREDIT` di `.github/workflows/build-apk.yml`.
+
+## Scan soal otomatis (di dalam APK)
+Jika asisten AI aktif, panel AI punya tombol **Scan soal** dan sakelar **Auto scan**.
+- Setelah halaman selesai dimuat (atau isinya berubah), aplikasi memeriksa teks halaman secara lokal. Hanya halaman yang tampak seperti soal (pilihan A/B/C, radio button, benar/salah) yang dikirim ke server AI (`/api/solve`).
+- Hasilnya tampil sebagai kartu: teks soal, opsi (mis. A. ... / B. ... atau Benar / Salah) dan jawaban saran AI ditandai ✓.
+- Mengetuk sebuah opsi di panel akan memilih opsi yang sama di halaman website. Soal isian menampilkan jawaban yang bisa disalin.
+- Auto scan bisa dimatikan dari panel (disimpan di perangkat). Jeda minimal 5 detik antar scan otomatis, dan teks yang sama tidak dikirim ulang.
+- Perlu deploy ulang Vercel (ada file baru `api/solve.js`) dan `GEMINI_API_KEY` atau `OPENAI_API_KEY`. Endpoint `/api/solve` diturunkan otomatis dari `/api/chat`, jadi form build tidak berubah.
+- Keterbatasan: soal di dalam iframe lintas-domain tidak terbaca; jawaban AI bisa salah, selalu periksa lagi; halaman dengan hitung mundur yang terus berubah hanya discan saat dimuat atau lewat tombol Scan soal.
+- Gunakan untuk latihan dan belajar. Jangan dipakai pada ujian yang melarang bantuan alat.
