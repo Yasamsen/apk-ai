@@ -60,30 +60,34 @@ export default async function handler(req, res) {
     const endpoint = useGemini
       ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
       : 'https://api.openai.com/v1/chat/completions';
-    const payload = useGemini
-      ? {
-          model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
-          max_tokens: 1500,
-          reasoning_effort: 'low'
-        }
-      : {
-          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
-          max_completion_tokens: 800
-        };
-    const upstream = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-    const data = await upstream.json().catch(() => ({}));
+    // Gemini: coba beberapa model berurutan jika satu model sibuk (503) atau kena batas.
+    const models = useGemini
+      ? [...new Set([process.env.GEMINI_MODEL, 'gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest'].filter(Boolean))]
+      : [process.env.OPENAI_MODEL || 'gpt-4o-mini'];
+    const base = [{ role: 'system', content: SYSTEM_PROMPT }, ...messages];
+
+    let upstream;
+    let data = {};
+    for (let i = 0; i < models.length; i++) {
+      const payload = useGemini
+        ? { model: models[i], messages: base, max_tokens: 1500, reasoning_effort: 'low' }
+        : { model: models[i], messages: base, max_completion_tokens: 800 };
+      upstream = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      data = await upstream.json().catch(() => ({}));
+      if (upstream.ok) break;
+      console.error(`${providerName} error`, models[i], upstream.status, JSON.stringify(data).slice(0, 500));
+      const keyProblem = upstream.status === 401 || upstream.status === 403;
+      if (keyProblem || i === models.length - 1) break;
+    }
     if (!upstream.ok) {
-      console.error(`${providerName} error`, upstream.status, JSON.stringify(data).slice(0, 500));
       const msg = upstream.status === 429
         ? `Kuota/batas permintaan ${providerName} tercapai. Coba lagi nanti.`
         : 'Layanan AI sedang bermasalah. Coba lagi nanti.';
