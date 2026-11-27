@@ -108,3 +108,6 @@ Jika asisten AI aktif, panel AI punya tombol **Scan soal** dan sakelar **Auto sc
 - Perlu deploy ulang Vercel (ada file baru `api/solve.js`) dan `GEMINI_API_KEY` atau `OPENAI_API_KEY`. Endpoint `/api/solve` diturunkan otomatis dari `/api/chat`, jadi form build tidak berubah.
 - Keterbatasan: soal di dalam iframe lintas-domain tidak terbaca; jawaban AI bisa salah, selalu periksa lagi; halaman dengan hitung mundur yang terus berubah hanya discan saat dimuat atau lewat tombol Scan soal.
 - Gunakan untuk latihan dan belajar. Jangan dipakai pada ujian yang melarang bantuan alat.
+
+## Tombol "Soal berikutnya"
+Panel AI punya tombol **Soal berikutnya →**. Satu ketukan menekan satu tombol lanjut di halaman (teks seperti Next/Selanjutnya/Berikutnya/Lanjut), lalu soal baru discan lagi jika Auto scan aktif. Pemilihan jawaban dan perpindahan soal tetap dilakukan pengguna satu per satu.

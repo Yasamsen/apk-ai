@@ -602,6 +602,18 @@ jobs:
                   autoLp.leftMargin = dp(8);
                   tools.addView(autoBtn, autoLp);
                   aiPanel.addView(tools);
+                  LinearLayout tools2 = new LinearLayout(this);
+                  tools2.setOrientation(LinearLayout.HORIZONTAL);
+                  tools2.setPadding(dp(12), 0, dp(12), dp(6));
+                  TextView nextBtn = new TextView(this);
+                  nextBtn.setText("Soal berikutnya \u2192");
+                  nextBtn.setTextColor(Color.parseColor("#EEF4FF"));
+                  nextBtn.setTypeface(null, Typeface.BOLD);
+                  nextBtn.setBackground(rounded("#26354C", 10));
+                  nextBtn.setPadding(dp(14), dp(8), dp(14), dp(8));
+                  nextBtn.setOnClickListener(v -> goNext());
+                  tools2.addView(nextBtn);
+                  aiPanel.addView(tools2);
                   refreshAutoBtn();
 
                   // Daftar pesan
@@ -1025,6 +1037,21 @@ jobs:
                   webView.evaluateJavascript(call, value -> {
                       if (value != null && value.contains("ok")) toast("Opsi dipilih di halaman");
                       else toast("Opsi tidak ditemukan di halaman. Pilih manual.");
+                  });
+              }
+              // Satu ketukan = satu kali menekan tombol "berikutnya" di halaman (pengguna tetap yang menjalankan tiap soal).
+              private void goNext() {
+                  if (webView == null) return;
+                  String js = loadScanScript();
+                  if (js.isEmpty()) return;
+                  webView.evaluateJavascript(js + "\n;window.__w2aNext();", value -> {
+                      if (value != null && value.contains("ok")) {
+                          lastScanAt = 0;
+                          lastScanHash = 0;
+                          toast("Lanjut ke soal berikutnya");
+                      } else {
+                          toast("Tombol berikutnya tidak ditemukan. Tekan manual di halaman.");
+                      }
                   });
               }
               // ===== Akhir scan soal =====
@@ -1514,6 +1541,27 @@ jobs:
                   var hit = findOption(node, want);
                   if (hit) { activate(hit); return 'ok'; }
                   if (node === document.body) break;
+                }
+              } catch (e) {}
+              return 'notfound';
+            };
+
+            // Dipanggil saat pengguna mengetuk "Soal berikutnya" di panel: menekan SATU tombol lanjut di halaman.
+            window.__w2aNext = function () {
+              try {
+                var cands = document.querySelectorAll('button,a,[role=button],input[type=button],input[type=submit]');
+                for (var i = 0; i < cands.length; i++) {
+                  var c = cands[i];
+                  var t = String(c.tagName === 'INPUT' ? c.value : c.textContent).replace(/\s+/g, ' ').trim();
+                  if (!t || t.length > 30) continue;
+                  if (c.disabled || c.getAttribute('aria-disabled') === 'true') continue;
+                  var r = c.getBoundingClientRect();
+                  if (r.width === 0 && r.height === 0) continue;
+                  if (/^(lanjut|lanjutkan|continue|>|>>|\u203a|\u00bb|\u2192)$/i.test(t) || /(next|selanjutnya|berikutnya)/i.test(t)) {
+                    try { c.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+                    fireClick(c);
+                    return 'ok';
+                  }
                 }
               } catch (e) {}
               return 'notfound';
