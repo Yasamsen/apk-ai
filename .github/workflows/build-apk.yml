@@ -178,6 +178,17 @@ jobs:
           import org.json.JSONArray;
           import org.json.JSONObject;
           import java.util.ArrayList;
+          import android.app.AlertDialog;
+          import android.content.ClipData;
+          import android.content.ClipboardManager;
+          import android.graphics.Bitmap;
+          import android.graphics.BitmapFactory;
+          import android.graphics.Canvas;
+          import com.google.mlkit.vision.common.InputImage;
+          import com.google.mlkit.vision.text.TextRecognition;
+          import com.google.mlkit.vision.text.TextRecognizer;
+          import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
+          import java.io.ByteArrayOutputStream;
 
           public class MainActivity extends Activity {
               private WebView webView;
@@ -198,6 +209,9 @@ jobs:
               private TextView aiSendButton;
               private boolean aiBusy = false;
               private final ArrayList<String[]> aiHistory = new ArrayList<>();
+              private TextRecognizer textRecognizer;
+              private String unlockScript;
+              private volatile boolean awaitingBlobOcr = false;
               private final class BlobDownloadBridge {
                   @JavascriptInterface public void saveBlob(String dataUrl, String requestedName, String requestedMime) {
                       new Thread(() -> {
@@ -250,12 +264,15 @@ jobs:
                   settings.setDomStorageEnabled(true);
                   settings.setGeolocationEnabled(true);
                   webView.addJavascriptInterface(new BlobDownloadBridge(), "AndroidBlobDownload");
+                  webView.addJavascriptInterface(new OcrBridge(), "AndroidOcr");
                   webView.setWebViewClient(new WebViewClient() {
                       @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                           super.onPageStarted(view, url, favicon);
+                          injectUnlock(view);
                       }
                       @Override public void onPageFinished(WebView view, String url) {
                           super.onPageFinished(view, url);
+                          injectUnlock(view);
                       }
                       @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                           if ("app".equals(request.getUrl().getScheme()) && "retry".equals(request.getUrl().getHost())) {
@@ -350,6 +367,21 @@ jobs:
                           String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                           android.widget.Toast.makeText(MainActivity.this, "Gagal memulai download: " + reason, android.widget.Toast.LENGTH_LONG).show();
                       }
+                  });
+                  // Tekan lama pada foto: tawarkan salin teks lewat OCR. Selain foto, biarkan
+                  // WebView memakai pemilihan teks bawaan (kursor + tombol Salin).
+                  webView.setOnLongClickListener(v -> {
+                      WebView.HitTestResult hit = webView.getHitTestResult();
+                      if (hit == null) return false;
+                      int type = hit.getType();
+                      if (type == WebView.HitTestResult.IMAGE_TYPE || type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
+                          String extra = hit.getExtra();
+                          if (extra != null && !extra.isEmpty()) {
+                              showImageOptions(extra);
+                              return true;
+                          }
+                      }
+                      return false;
                   });
                   FrameLayout rootLayout = new FrameLayout(this);
                   rootLayout.addView(webView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -672,6 +704,220 @@ jobs:
               }
               // ===== Akhir asisten AI =====
 
+              // ===== Salin teks: buka blokir + OCR foto =====
+              private void toast(String message) {
+                  android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show();
+              }
+
+              private String loadUnlockScript() {
+                  if (unlockScript != null) return unlockScript;
+                  try (InputStream in = getAssets().open("web2apk_unlock.js")) {
+                      unlockScript = readAll(in);
+                  } catch (Exception e) {
+                      android.util.Log.e("Web2APK", "Skrip salin teks gagal dimuat", e);
+                      unlockScript = "";
+                  }
+                  return unlockScript;
+              }
+
+              private void injectUnlock(WebView view) {
+                  String js = loadUnlockScript();
+                  if (view != null && !js.isEmpty()) view.evaluateJavascript(js, null);
+              }
+
+              private final class OcrBridge {
+                  @JavascriptInterface public void onImage(final String dataUrl) {
+                      if (!awaitingBlobOcr) return;
+                      awaitingBlobOcr = false;
+                      new Thread(() -> {
+                          Bitmap bmp = null;
+                          try { bmp = loadBitmap(dataUrl, null, null, null); } catch (Exception e) {
+                              android.util.Log.e("Web2APK", "Baca foto blob gagal", e);
+                          }
+                          final Bitmap loaded = bmp;
+                          runOnUiThread(() -> {
+                              if (loaded != null) runOcr(loaded);
+                              else { toast("Foto tidak bisa dibaca langsung, memindai tampilan layar..."); startScreenOcr(); }
+                          });
+                      }).start();
+                  }
+                  @JavascriptInterface public void onError(String message) {
+                      if (!awaitingBlobOcr) return;
+                      awaitingBlobOcr = false;
+                      runOnUiThread(() -> { toast("Foto tidak bisa dibaca langsung, memindai tampilan layar..."); startScreenOcr(); });
+                  }
+              }
+
+              private void showImageOptions(final String imageUrl) {
+                  final String[] items = {"Salin teks dari foto ini", "Salin teks dari seluruh layar"};
+                  new AlertDialog.Builder(this)
+                          .setTitle("Foto")
+                          .setItems(items, (d, which) -> {
+                              if (which == 0) startImageOcr(imageUrl);
+                              else startScreenOcr();
+                          })
+                          .show();
+              }
+
+              private void startImageOcr(final String imageUrl) {
+                  toast("Membaca teks dari foto...");
+                  if (imageUrl.startsWith("blob:")) {
+                      awaitingBlobOcr = true;
+                      String script = "(async function(){try{const r=await fetch(" + JSONObject.quote(imageUrl)
+                              + ");const b=await r.blob();const rd=new FileReader();rd.onloadend=function(){AndroidOcr.onImage(String(rd.result));};rd.readAsDataURL(b);}catch(e){AndroidOcr.onError(String(e));}})();";
+                      webView.evaluateJavascript(script, null);
+                      return;
+                  }
+                  final String cookie = CookieManager.getInstance().getCookie(imageUrl);
+                  final String ua = webView.getSettings().getUserAgentString();
+                  final String referer = webView.getUrl();
+                  new Thread(() -> {
+                      Bitmap bmp = null;
+                      try { bmp = loadBitmap(imageUrl, cookie, ua, referer); } catch (Exception e) {
+                          android.util.Log.e("Web2APK", "Unduh foto untuk OCR gagal", e);
+                      }
+                      final Bitmap loaded = bmp;
+                      runOnUiThread(() -> {
+                          if (loaded != null) runOcr(loaded);
+                          else { toast("Foto tidak bisa diunduh langsung, memindai tampilan layar..."); startScreenOcr(); }
+                      });
+                  }).start();
+              }
+
+              private Bitmap loadBitmap(String url, String cookie, String ua, String referer) throws Exception {
+                  byte[] bytes = null;
+                  if (url.startsWith("data:")) {
+                      int comma = url.indexOf(',');
+                      if (comma < 0) return null;
+                      String meta = url.substring(0, comma);
+                      String payload = url.substring(comma + 1);
+                      bytes = meta.contains(";base64") ? Base64.decode(payload, Base64.DEFAULT) : Uri.decode(payload).getBytes("UTF-8");
+                  } else if (url.startsWith("http://") || url.startsWith("https://")) {
+                      HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                      try {
+                          conn.setConnectTimeout(15000);
+                          conn.setReadTimeout(30000);
+                          if (cookie != null && !cookie.isEmpty()) conn.setRequestProperty("Cookie", cookie);
+                          if (ua != null && !ua.isEmpty()) conn.setRequestProperty("User-Agent", ua);
+                          if (referer != null && !referer.isEmpty()) conn.setRequestProperty("Referer", referer);
+                          if (conn.getResponseCode() != 200) return null;
+                          try (InputStream in = conn.getInputStream()) { bytes = readBytes(in, 25 * 1024 * 1024); }
+                      } finally {
+                          conn.disconnect();
+                      }
+                  } else {
+                      return null;
+                  }
+                  return decodeBytes(bytes);
+              }
+
+              private byte[] readBytes(InputStream in, int cap) throws IOException {
+                  ByteArrayOutputStream out = new ByteArrayOutputStream();
+                  byte[] buf = new byte[8192];
+                  int n, total = 0;
+                  while ((n = in.read(buf)) != -1) {
+                      total += n;
+                      if (total > cap) throw new IOException("Foto terlalu besar");
+                      out.write(buf, 0, n);
+                  }
+                  return out.toByteArray();
+              }
+
+              private Bitmap decodeBytes(byte[] bytes) {
+                  if (bytes == null || bytes.length == 0) return null;
+                  BitmapFactory.Options bounds = new BitmapFactory.Options();
+                  bounds.inJustDecodeBounds = true;
+                  BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+                  int longest = Math.max(bounds.outWidth, bounds.outHeight);
+                  int sample = 1;
+                  while (longest / sample > 4000) sample *= 2;
+                  BitmapFactory.Options opts = new BitmapFactory.Options();
+                  opts.inSampleSize = sample;
+                  return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, opts);
+              }
+
+              private Bitmap captureWebView() {
+                  try {
+                      int w = webView.getWidth(), h = webView.getHeight();
+                      if (w <= 0 || h <= 0) return null;
+                      Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                      webView.draw(new Canvas(bmp));
+                      return bmp;
+                  } catch (Throwable t) {
+                      android.util.Log.e("Web2APK", "Tangkap layar gagal", t);
+                      return null;
+                  }
+              }
+
+              private void startScreenOcr() {
+                  Bitmap shot = captureWebView();
+                  if (shot == null) { toast("Tidak bisa mengambil tampilan layar"); return; }
+                  toast("Membaca teks di layar...");
+                  runOcr(shot);
+              }
+
+              // Ratakan ke latar putih (foto transparan) dan atur ukuran supaya OCR akurat.
+              private Bitmap prepareForOcr(Bitmap src) {
+                  if (src == null) return null;
+                  int w = src.getWidth(), h = src.getHeight();
+                  int longest = Math.max(w, h);
+                  if (longest <= 0) return null;
+                  float scale = 1f;
+                  if (longest > 3000) scale = 3000f / longest;
+                  else if (longest < 800) scale = Math.min(3f, 800f / longest);
+                  int nw = Math.max(1, Math.round(w * scale));
+                  int nh = Math.max(1, Math.round(h * scale));
+                  Bitmap out = Bitmap.createBitmap(nw, nh, Bitmap.Config.ARGB_8888);
+                  Canvas c = new Canvas(out);
+                  c.drawColor(Color.WHITE);
+                  c.drawBitmap(src, null, new android.graphics.Rect(0, 0, nw, nh), new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG));
+                  return out;
+              }
+
+              private void runOcr(Bitmap source) {
+                  try {
+                      Bitmap bmp = prepareForOcr(source);
+                      if (bmp == null) { toast("Gambar tidak valid"); return; }
+                      if (textRecognizer == null) textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+                      textRecognizer.process(InputImage.fromBitmap(bmp, 0))
+                              .addOnSuccessListener(result -> showOcrResult(result.getText()))
+                              .addOnFailureListener(e -> {
+                                  android.util.Log.e("Web2APK", "OCR gagal", e);
+                                  toast("Gagal membaca teks dari foto");
+                              });
+                  } catch (Throwable t) {
+                      android.util.Log.e("Web2APK", "OCR error", t);
+                      toast("Gagal membaca teks dari foto");
+                  }
+              }
+
+              private void showOcrResult(String text) {
+                  if (text == null || text.trim().isEmpty()) { toast("Tidak ada teks yang terbaca pada foto"); return; }
+                  final String finalText = text.trim();
+                  ScrollView scroll = new ScrollView(this);
+                  TextView tv = new TextView(this);
+                  tv.setText(finalText);
+                  tv.setTextIsSelectable(true);
+                  tv.setTextSize(15f);
+                  tv.setTextColor(Color.parseColor("#111111"));
+                  tv.setPadding(dp(20), dp(12), dp(20), dp(12));
+                  scroll.addView(tv);
+                  new AlertDialog.Builder(this)
+                          .setTitle("Teks dari foto")
+                          .setView(scroll)
+                          .setPositiveButton("Salin semua", (d, w) -> copyToClipboard("Teks dari foto", finalText))
+                          .setNegativeButton("Tutup", null)
+                          .show();
+              }
+
+              private void copyToClipboard(String label, String text) {
+                  ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                  if (cm == null) { toast("Papan klip tidak tersedia"); return; }
+                  cm.setPrimaryClip(ClipData.newPlainText(label, text));
+                  toast("Teks disalin");
+              }
+              // ===== Akhir salin teks =====
+
               private void showOfflinePage() {
                   String page = "<!doctype html><html lang='id'><meta name='viewport' content='width=device-width,initial-scale=1'><meta charset='utf-8'><title>Internet tidak tersedia</title><style>body{font-family:system-ui,sans-serif;background:#101827;color:#f3f6ff;display:grid;place-items:center;min-height:90vh;margin:0;padding:24px;text-align:center}main{max-width:360px}h2{font-size:24px}p{color:#c2ccdc;line-height:1.6}button{background:#57d3a5;color:#05281d;border:0;border-radius:10px;padding:12px 20px;font-weight:700;font-size:16px}</style><main><h2>Internet tidak tersedia</h2><p>Periksa koneksi internet kamu, lalu coba lagi. Jika koneksi sudah aktif, halaman mungkin sedang tidak bisa diakses.</p><a href='app://retry' style='display:inline-block;background:#57d3a5;color:#05281d;text-decoration:none;border-radius:10px;padding:12px 20px;font-weight:700'>Coba lagi</a></main></html>";
                   webView.loadDataWithBaseURL(null, page, "text/html", "UTF-8", null);
@@ -688,6 +934,138 @@ jobs:
           }
           '''.replace("__PACKAGE__", pkg).replace("__URL__", os.environ["WEBSITE_URL"]).replace("__AI_ENDPOINT__", os.environ.get("AI_ENDPOINT", "")), encoding="utf-8")
           PY
+
+          mkdir -p app/src/main/assets
+          cat > app/src/main/assets/web2apk_unlock.js <<'EOF'
+          (function () {
+            var NAMES = ['onselectstart', 'oncopy', 'oncontextmenu'];
+            var BLOCKED = { selectstart: 1, copy: 1, contextmenu: 1 };
+            var CSS = 'html:not(#_w2a),html *:not(#_w2a),html *:not(#_w2a)::before,html *:not(#_w2a)::after{-webkit-user-select:text!important;user-select:text!important;}' +
+                      '::selection{background:rgba(66,133,244,.35)!important;}';
+
+            function setup(win) {
+              var doc;
+              try {
+                if (!win || win.__w2aUnlock) return;
+                doc = win.document;
+                if (!doc || !doc.documentElement) return;
+                win.__w2aUnlock = true;
+              } catch (e) { return; }
+
+              // 1) Abaikan preventDefault() untuk event pemilihan/salin teks
+              try {
+                var proto = win.Event.prototype;
+                var origPrevent = proto.preventDefault;
+                proto.preventDefault = function () {
+                  if (this && BLOCKED[this.type]) return;
+                  return origPrevent.apply(this, arguments);
+                };
+                var rv = Object.getOwnPropertyDescriptor(proto, 'returnValue');
+                if (rv && rv.set) {
+                  Object.defineProperty(proto, 'returnValue', {
+                    configurable: true,
+                    enumerable: rv.enumerable,
+                    get: rv.get,
+                    set: function (v) { if (this && BLOCKED[this.type]) return; rv.set.call(this, v); }
+                  });
+                }
+              } catch (e) {}
+
+              // 2) Matikan handler yang sudah terpasang, lalu cegah dipasang lagi
+              function nullHandlers(t) {
+                NAMES.forEach(function (n) { try { t[n] = null; } catch (e) {} });
+              }
+              nullHandlers(doc);
+              nullHandlers(doc.documentElement);
+              nullHandlers(doc.body);
+              nullHandlers(win);
+              NAMES.forEach(function (n) {
+                [win.Document && win.Document.prototype, win.HTMLElement && win.HTMLElement.prototype, win].forEach(function (t) {
+                  if (!t) return;
+                  try {
+                    Object.defineProperty(t, n, { configurable: true, get: function () { return null; }, set: function () {} });
+                  } catch (e) {}
+                });
+              });
+
+              // 3) CSS: paksa semua elemen bisa dipilih teksnya
+              function ensureStyle() {
+                try {
+                  var s = doc.getElementById('__w2a_unlock_css');
+                  if (!s) {
+                    s = doc.createElement('style');
+                    s.id = '__w2a_unlock_css';
+                    s.textContent = CSS;
+                  }
+                  var host = doc.head || doc.documentElement;
+                  if (s.parentNode !== host) host.appendChild(s);
+                } catch (e) {}
+              }
+
+              // 4) Style inline user-select:none (termasuk yang memakai !important)
+              function fixInline() {
+                try {
+                  var els = doc.querySelectorAll('[style*="select"]');
+                  for (var i = 0; i < els.length; i++) {
+                    var st = els[i].style;
+                    var a = st.getPropertyValue('-webkit-user-select');
+                    var b = st.getPropertyValue('user-select');
+                    if ((a && a !== 'text') || (b && b !== 'text')) {
+                      st.setProperty('-webkit-user-select', 'text', 'important');
+                      st.setProperty('user-select', 'text', 'important');
+                    }
+                  }
+                } catch (e) {}
+              }
+
+              // 5) Atribut inline onselectstart / oncopy / oncontextmenu
+              function cleanAttrs() {
+                try {
+                  var list = doc.querySelectorAll('[onselectstart],[oncopy],[oncontextmenu]');
+                  for (var i = 0; i < list.length; i++) {
+                    for (var j = 0; j < NAMES.length; j++) list[i].removeAttribute(NAMES[j]);
+                  }
+                } catch (e) {}
+              }
+
+              // 6) iframe satu origin
+              function hookFrames() {
+                try {
+                  var frames = doc.querySelectorAll('iframe,frame');
+                  for (var i = 0; i < frames.length; i++) {
+                    var f = frames[i];
+                    if (!f.__w2aHooked) {
+                      f.__w2aHooked = true;
+                      f.addEventListener('load', function () { try { setup(this.contentWindow); } catch (e) {} });
+                    }
+                    try { setup(f.contentWindow); } catch (e) {}
+                  }
+                } catch (e) {}
+              }
+
+              function refresh() { ensureStyle(); cleanAttrs(); fixInline(); hookFrames(); }
+              refresh();
+
+              var timer = null;
+              function schedule() {
+                if (timer) return;
+                timer = win.setTimeout(function () { timer = null; refresh(); }, 500);
+              }
+              try {
+                new win.MutationObserver(schedule).observe(doc.documentElement, {
+                  childList: true,
+                  subtree: true,
+                  attributes: true,
+                  attributeFilter: ['onselectstart', 'oncopy', 'oncontextmenu']
+                });
+              } catch (e) {}
+              doc.addEventListener('DOMContentLoaded', refresh);
+              win.addEventListener('load', refresh);
+            }
+
+            setup(window);
+          })();
+          EOF
 
           cat > settings.gradle <<'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
@@ -725,6 +1103,7 @@ jobs:
             }
           }
           dependencies {
+            implementation 'com.google.mlkit:text-recognition:16.0.1'
           }
           EOF
 

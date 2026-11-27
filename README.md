@@ -79,3 +79,17 @@ Jika `GEMINI_API_KEY` diisi di Environment Variables Vercel, `/api/chat` otomati
 
 ### Scan website
 Tombol **Scan** di samping kolom URL memanggil `/api/scan`, yang membaca halaman HTTPS publik (judul, manifest web, ikon, warna tema) lalu menampilkan pratinjau dan mengisi nama aplikasi, package ID, dan URL ikon secara otomatis jika masih kosong. Alamat internal/privat (localhost, 10.x, 192.168.x, 169.254.x, dll.) diblokir. Hanya ikon PNG/JPG yang diisi otomatis; ikon lain (ICO/SVG) perlu diunggah manual.
+
+
+## Salin teks (termasuk teks pada foto)
+
+Semua APK hasil build sekarang punya dua kemampuan salin teks, tanpa pengaturan tambahan:
+
+- **Teks halaman**: tekan lama pada teks, geser pegangan untuk memilih, lalu ketuk **Salin**. Pemilihan teks dipaksa aktif di semua elemen, bahkan di website yang memasang `user-select: none` atau memblokir `selectstart`, `copy`, dan `contextmenu`. Skrip pembukanya ada di `web2apk_unlock.js` (dibuat otomatis oleh workflow) dan dijalankan setiap halaman dimuat, termasuk iframe satu origin.
+- **Teks pada foto (OCR)**: tekan lama pada foto, lalu pilih **Salin teks dari foto ini** atau **Salin teks dari seluruh layar**. Hasilnya tampil di jendela yang teksnya bisa dipilih, dengan tombol **Salin semua**. OCR memakai ML Kit Text Recognition yang modelnya ikut di dalam APK, jadi jalan offline.
+
+Catatan:
+- OCR bawaan membaca huruf Latin (Indonesia, Inggris, dll.). Untuk huruf Mandarin, Jepang, Korea, atau Devanagari, tambahkan dependency ML Kit yang sesuai di `app/build.gradle` pada workflow.
+- Ukuran APK bertambah karena model OCR ikut dibundel.
+- Jika foto tidak bisa diunduh langsung (misalnya diblokir server), aplikasi otomatis memindai tampilan layar sebagai gantinya.
+- Foto yang ditutup lapisan transparan oleh website bisa gagal terdeteksi sebagai foto saat ditekan lama. Pakai **Salin teks dari seluruh layar** dari foto lain, atau minta saya tambahkan tombol OCR melayang.
