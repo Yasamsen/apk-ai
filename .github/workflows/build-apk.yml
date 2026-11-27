@@ -388,6 +388,7 @@ jobs:
                   rootLayout.addView(webView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
                   setContentView(rootLayout);
                   if (AI_ENDPOINT != null && !AI_ENDPOINT.isEmpty()) setupAssistant(rootLayout);
+                  addDeveloperWatermark(rootLayout);
                   if (savedInstanceState != null) webView.restoreState(savedInstanceState);
                   else webView.loadUrl(startUrl);
               }
@@ -422,6 +423,28 @@ jobs:
                       pendingGeoCallback = null; pendingGeoOrigin = null;
                   }
               }
+              // ===== Watermark developer =====
+              private static final String DEV_CREDIT = "Dev: Yasam | WA 6281519986005";
+
+              private void addDeveloperWatermark(FrameLayout root) {
+                  TextView wm = new TextView(this);
+                  wm.setText(DEV_CREDIT);
+                  wm.setTextSize(10f);
+                  wm.setTextColor(Color.WHITE);
+                  wm.setAlpha(0.55f);
+                  wm.setPadding(dp(8), dp(3), dp(8), dp(3));
+                  wm.setBackground(rounded("#99000000", 10));
+                  wm.setClickable(false);
+                  wm.setFocusable(false);
+                  FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                          Gravity.BOTTOM | Gravity.END);
+                  lp.setMargins(0, 0, dp(6), dp(6));
+                  root.addView(wm, lp);
+                  wm.bringToFront();
+              }
+              // ===== Akhir watermark developer =====
+
               // ===== Asisten AI melayang =====
               private int dp(int v) {
                   return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
@@ -952,7 +975,7 @@ jobs:
               // ===== Akhir salin teks =====
 
               private void showOfflinePage() {
-                  String page = "<!doctype html><html lang='id'><meta name='viewport' content='width=device-width,initial-scale=1'><meta charset='utf-8'><title>Internet tidak tersedia</title><style>body{font-family:system-ui,sans-serif;background:#101827;color:#f3f6ff;display:grid;place-items:center;min-height:90vh;margin:0;padding:24px;text-align:center}main{max-width:360px}h2{font-size:24px}p{color:#c2ccdc;line-height:1.6}button{background:#57d3a5;color:#05281d;border:0;border-radius:10px;padding:12px 20px;font-weight:700;font-size:16px}</style><main><h2>Internet tidak tersedia</h2><p>Periksa koneksi internet kamu, lalu coba lagi. Jika koneksi sudah aktif, halaman mungkin sedang tidak bisa diakses.</p><a href='app://retry' style='display:inline-block;background:#57d3a5;color:#05281d;text-decoration:none;border-radius:10px;padding:12px 20px;font-weight:700'>Coba lagi</a></main></html>";
+                  String page = "<!doctype html><html lang='id'><meta name='viewport' content='width=device-width,initial-scale=1'><meta charset='utf-8'><title>Internet tidak tersedia</title><style>body{font-family:system-ui,sans-serif;background:#101827;color:#f3f6ff;display:grid;place-items:center;min-height:90vh;margin:0;padding:24px;text-align:center}main{max-width:360px}h2{font-size:24px}p{color:#c2ccdc;line-height:1.6}button{background:#57d3a5;color:#05281d;border:0;border-radius:10px;padding:12px 20px;font-weight:700;font-size:16px}</style><main><h2>Internet tidak tersedia</h2><p>Periksa koneksi internet kamu, lalu coba lagi. Jika koneksi sudah aktif, halaman mungkin sedang tidak bisa diakses.</p><a href='app://retry' style='display:inline-block;background:#57d3a5;color:#05281d;text-decoration:none;border-radius:10px;padding:12px 20px;font-weight:700'>Coba lagi</a><p style='font-size:12px;margin-top:28px'>Dev: Yasam &middot; <a href='https://wa.me/6281519986005' style='color:#57d3a5'>WhatsApp 6281519986005</a></p></main></html>";
                   webView.loadDataWithBaseURL(null, page, "text/html", "UTF-8", null);
               }
               @Override protected void onSaveInstanceState(Bundle outState) {

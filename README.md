@@ -1,5 +1,7 @@
 # Web2APK Gratis — starter project
 
+> Developer: **Yasam** · WhatsApp: [+62 815-1998-6005](https://wa.me/6281519986005)
+
 Starter gratis untuk membuat APK Android WebView dari HP menggunakan:
 - Frontend statis di Vercel
 - GitHub Actions sebagai build worker
@@ -93,3 +95,6 @@ Catatan:
 - Ukuran APK bertambah karena model OCR ikut dibundel.
 - Jika foto tidak bisa diunduh langsung (misalnya diblokir server), aplikasi otomatis memindai tampilan layar sebagai gantinya.
 - Foto yang ditutup lapisan transparan oleh website bisa gagal terdeteksi sebagai foto saat ditekan lama. Pakai **Salin teks dari seluruh layar** dari foto lain, atau minta saya tambahkan tombol OCR melayang.
+
+## Watermark developer di dalam APK
+Setiap APK hasil build menampilkan label kecil semi-transparan "Dev: Yasam | WA 6281519986005" di pojok kanan bawah (tidak menghalangi sentuhan ke website), serta kredit dengan link WhatsApp di halaman offline. Teks dapat diubah pada konstanta `DEV_CREDIT` di `.github/workflows/build-apk.yml`.

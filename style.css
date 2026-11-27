@@ -57,3 +57,13 @@ button.secondary{margin-top:0;padding:0 18px;background:#26354c;color:var(--text
 .scan-error{color:#ff9b9b;font-size:13px}
 .scan button.secondary{padding:10px 14px;font-size:13px;justify-self:start}
 .scan[hidden]{display:none}
+
+/* ===== Watermark developer ===== */
+footer p{margin:0 0 4px}
+footer strong{color:var(--accent)}
+.wa-link{color:var(--accent);text-decoration:none;font-weight:700}
+.dev-badge{position:fixed;right:12px;bottom:12px;z-index:50;padding:8px 12px;border-radius:999px;background:rgba(17,27,46,.92);border:1px solid var(--accent);color:var(--text);font-size:12px;text-decoration:none;backdrop-filter:blur(4px)}
+.dev-badge strong{color:var(--accent)}
+.watermark{position:fixed;inset:0;z-index:40;pointer-events:none;user-select:none;opacity:.06;
+background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='160'><text x='150' y='80' text-anchor='middle' transform='rotate(-25 150 80)' font-family='sans-serif' font-size='15' font-weight='700' fill='white'>Yasam · WA 6281519986005</text></svg>")}
+.wrap{padding-bottom:70px}
