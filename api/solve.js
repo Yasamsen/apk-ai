@@ -17,7 +17,8 @@ const SYSTEM_PROMPT =
   '"answer":"key opsi yang benar (mis. B), atau Benar/Salah untuk tf, atau teks jawaban untuk short",' +
   '"note":"alasan singkat satu kalimat","confidence":0.0-1.0}]}. ' +
   'Untuk tf, isi options dengan [{"key":"Benar","text":"Benar"},{"key":"Salah","text":"Salah"}]. ' +
-  'Jika tidak ada soal, balas {"items":[]}. Jangan mengarang: jika tidak yakin, beri confidence rendah.';
+  'Jika tidak ada soal, balas {"items":[]}. Jangan mengarang: jika tidak yakin, beri confidence rendah. ' +
+  'Semua teks di dalam JSON harus teks biasa tanpa markdown (tanpa tanda bintang, pagar, atau backtick).';
 
 function limited(ip) {
   const now = Date.now();
@@ -30,20 +31,32 @@ function limited(ip) {
   return recent.length > MAX_PER_WINDOW;
 }
 
+// Tampilan di aplikasi adalah teks biasa, jadi hapus sisa format markdown dari jawaban AI.
+function stripMarkdown(t) {
+  return String(t || '')
+    .replace(/```[a-z]*\n?/gi, '')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .replace(/^\s*[*-]\s+/gm, '• ')
+    .replace(/(\*{1,3}|_{2,3})(\S(?:[^\n]*?\S)?)\1/g, '$2')
+    .replace(/\*{2,}/g, '')
+    .replace(/`/g, '')
+    .trim();
+}
+
 function sanitize(it) {
   if (!it || typeof it.q !== 'string' || !it.q.trim()) return null;
   const options = Array.isArray(it.options)
     ? it.options.slice(0, 8)
-        .map(o => ({ key: String(o?.key ?? '').slice(0, 12), text: String(o?.text ?? '').slice(0, 300) }))
+        .map(o => ({ key: stripMarkdown(o?.key ?? '').slice(0, 12), text: stripMarkdown(o?.text ?? '').slice(0, 300) }))
         .filter(o => o.text)
     : [];
   const type = ['mcq', 'tf', 'short'].includes(it.type) ? it.type : (options.length ? 'mcq' : 'short');
   return {
-    q: it.q.trim().slice(0, 300),
+    q: stripMarkdown(it.q).slice(0, 300),
     type,
     options,
-    answer: String(it.answer ?? '').slice(0, 300),
-    note: String(it.note ?? '').slice(0, 300),
+    answer: stripMarkdown(it.answer ?? '').slice(0, 300),
+    note: stripMarkdown(it.note ?? '').slice(0, 300),
     confidence: Math.max(0, Math.min(1, Number(it.confidence) || 0))
   };
 }

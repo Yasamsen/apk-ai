@@ -23,6 +23,10 @@
     {
       "source": "/api/solve",
       "destination": "/api/solve.js"
+    },
+    {
+      "source": "/api/verify-key",
+      "destination": "/api/verify-key.js"
     }
   ],
   "functions": {
@@ -34,6 +38,9 @@
     },
     "api/solve.js": {
       "maxDuration": 30
+    },
+    "api/verify-key.js": {
+      "maxDuration": 10
     }
   }
 }

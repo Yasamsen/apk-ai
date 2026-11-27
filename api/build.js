@@ -60,6 +60,19 @@ export default async function handler(req, res) {
     }
   }
 
+  // Gerbang key: aktif otomatis jika APP_ACCESS_KEY diisi di Vercel.
+  let keyEndpoint = '';
+  if (String(process.env.APP_ACCESS_KEY || '').trim()) {
+    keyEndpoint = process.env.KEY_ENDPOINT || '';
+    if (!keyEndpoint) {
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+      if (!/^[a-z0-9.-]+(:\d+)?$/i.test(host)) {
+        return res.status(500).json({ error: 'Tidak bisa menentukan alamat verifikasi key. Atur KEY_ENDPOINT di Vercel.' });
+      }
+      keyEndpoint = `https://${host}/api/verify-key`;
+    }
+  }
+
   const api = `https://api.github.com/repos/${encodeURIComponent(GH_OWNER)}/${encodeURIComponent(GH_REPO)}/actions/workflows/build-apk.yml/dispatches`;
   const gh = await fetch(api, {
     method: 'POST',
@@ -72,7 +85,7 @@ export default async function handler(req, res) {
     },
     body: JSON.stringify({
       ref: 'main',
-      inputs: { website_url: url, app_name: appName, package_name: packageName, icon_url: iconData ? '' : iconUrl, icon_data: iconData, ai_endpoint: aiEndpoint }
+      inputs: { website_url: url, app_name: appName, package_name: packageName, icon_url: iconData ? '' : iconUrl, icon_data: iconData, ai_endpoint: aiEndpoint, key_endpoint: keyEndpoint }
     })
   });
   if (gh.status !== 204) {

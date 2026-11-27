@@ -27,6 +27,10 @@ on:
         description: "Optional HTTPS URL of the AI chat proxy (empty = no floating AI assistant)"
         required: false
         type: string
+      key_endpoint:
+        description: "Optional HTTPS URL of the access-key check (empty = no key gate)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -44,6 +48,7 @@ jobs:
           ICON_URL: ${{ inputs.icon_url }}
           ICON_DATA: ${{ inputs.icon_data }}
           AI_ENDPOINT: ${{ inputs.ai_endpoint }}
+          KEY_ENDPOINT: ${{ inputs.key_endpoint }}
         run: |
           python - <<'PY'
           import os, re
@@ -67,6 +72,11 @@ jobs:
               e = urlparse(ep)
               if e.scheme != "https" or not e.hostname or e.username or e.password or re.search(r'["\\\s<>]', ep):
                   raise SystemExit("AI endpoint must be a clean HTTPS URL")
+          kp = os.environ.get("KEY_ENDPOINT", "")
+          if kp:
+              k = urlparse(kp)
+              if k.scheme != "https" or not k.hostname or k.username or k.password or re.search(r'["\\\s<>]', kp):
+                  raise SystemExit("Key endpoint must be a clean HTTPS URL")
           PY
 
       - uses: actions/checkout@v4
@@ -112,6 +122,7 @@ jobs:
           APP_NAME: ${{ inputs.app_name }}
           PACKAGE_NAME: ${{ inputs.package_name }}
           AI_ENDPOINT: ${{ inputs.ai_endpoint }}
+          KEY_ENDPOINT: ${{ inputs.key_endpoint }}
         run: |
           mkdir -p app/src/main/java
           mkdir -p app/src/main/res/values
@@ -201,6 +212,15 @@ jobs:
               private static final int GEO_PERMISSION_CODE = 7002;
               private String startUrl = "__URL__";
               private static final String AI_ENDPOINT = "__AI_ENDPOINT__";
+              private static final String KEY_ENDPOINT = "__KEY_ENDPOINT__";
+              private static final String KEY_PREFS = "web2apk_access";
+              private View keyGate;
+              private EditText keyInput;
+              private TextView keyStatus;
+              private TextView keySubmit;
+              private boolean keyBusy = false;
+              private boolean webStarted = false;
+              private Bundle pendingState;
               private View aiFab;
               private LinearLayout aiPanel;
               private LinearLayout aiMessages;
@@ -391,8 +411,7 @@ jobs:
                   setContentView(rootLayout);
                   if (AI_ENDPOINT != null && !AI_ENDPOINT.isEmpty()) setupAssistant(rootLayout);
                   addDeveloperWatermark(rootLayout);
-                  if (savedInstanceState != null) webView.restoreState(savedInstanceState);
-                  else webView.loadUrl(startUrl);
+                  beginAccess(rootLayout, savedInstanceState);
               }
               @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
                   super.onActivityResult(requestCode, resultCode, data);
@@ -425,6 +444,155 @@ jobs:
                       pendingGeoCallback = null; pendingGeoOrigin = null;
                   }
               }
+              // ===== Gerbang key akses =====
+              private void startWeb() {
+                  if (webStarted) return;
+                  webStarted = true;
+                  if (pendingState != null) webView.restoreState(pendingState);
+                  else webView.loadUrl(startUrl);
+                  pendingState = null;
+              }
+
+              private void beginAccess(final FrameLayout root, Bundle state) {
+                  pendingState = state;
+                  if (KEY_ENDPOINT == null || KEY_ENDPOINT.isEmpty()) { startWeb(); return; }
+                  showKeyGate(root);
+                  String saved = getSharedPreferences(KEY_PREFS, MODE_PRIVATE).getString("key", "");
+                  if (saved != null && !saved.isEmpty()) verifyKey(saved);
+              }
+
+              private void showKeyGate(FrameLayout root) {
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setGravity(Gravity.CENTER);
+                  box.setBackgroundColor(Color.parseColor("#101827"));
+                  box.setPadding(dp(28), dp(28), dp(28), dp(28));
+                  box.setClickable(true);
+                  box.setFocusable(true);
+
+                  TextView title = new TextView(this);
+                  title.setText("Masukkan Key");
+                  title.setTextColor(Color.WHITE);
+                  title.setTextSize(24);
+                  title.setTypeface(null, Typeface.BOLD);
+                  title.setGravity(Gravity.CENTER);
+                  box.addView(title, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+                  TextView sub = new TextView(this);
+                  sub.setText("Masukkan key akses untuk membuka aplikasi.");
+                  sub.setTextColor(Color.parseColor("#9CA3AF"));
+                  sub.setTextSize(14);
+                  sub.setGravity(Gravity.CENTER);
+                  LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  subLp.setMargins(0, dp(8), 0, dp(20));
+                  box.addView(sub, subLp);
+
+                  keyInput = new EditText(this);
+                  keyInput.setHint("Key akses");
+                  keyInput.setHintTextColor(Color.parseColor("#6B7280"));
+                  keyInput.setTextColor(Color.WHITE);
+                  keyInput.setSingleLine(true);
+                  keyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                  keyInput.setPadding(dp(14), dp(12), dp(14), dp(12));
+                  keyInput.setBackground(rounded("#1F2937", 12));
+                  box.addView(keyInput, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+                  keyStatus = new TextView(this);
+                  keyStatus.setTextColor(Color.parseColor("#FCA5A5"));
+                  keyStatus.setTextSize(13);
+                  keyStatus.setGravity(Gravity.CENTER);
+                  LinearLayout.LayoutParams stLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  stLp.setMargins(0, dp(10), 0, dp(10));
+                  box.addView(keyStatus, stLp);
+
+                  keySubmit = new TextView(this);
+                  keySubmit.setText("Masuk");
+                  keySubmit.setTextColor(Color.parseColor("#05281D"));
+                  keySubmit.setTextSize(16);
+                  keySubmit.setTypeface(null, Typeface.BOLD);
+                  keySubmit.setGravity(Gravity.CENTER);
+                  keySubmit.setPadding(dp(14), dp(13), dp(14), dp(13));
+                  keySubmit.setBackground(rounded("#34D399", 12));
+                  keySubmit.setClickable(true);
+                  keySubmit.setOnClickListener(v -> submitKey());
+                  box.addView(keySubmit, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+                  keyInput.setOnEditorActionListener((v, actionId, event) -> { submitKey(); return true; });
+
+                  keyGate = box;
+                  root.addView(box, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                  box.bringToFront();
+              }
+
+              private void submitKey() {
+                  String key = keyInput.getText().toString().trim();
+                  if (key.isEmpty()) { keyStatus.setText("Key tidak boleh kosong."); return; }
+                  verifyKey(key);
+              }
+
+              private void setKeyBusy(boolean busy, String message) {
+                  if (keyStatus != null) {
+                      keyStatus.setTextColor(Color.parseColor(busy ? "#9CA3AF" : "#FCA5A5"));
+                      keyStatus.setText(message == null ? "" : message);
+                  }
+                  if (keySubmit != null) { keySubmit.setEnabled(!busy); keySubmit.setAlpha(busy ? 0.5f : 1f); }
+                  if (keyInput != null) keyInput.setEnabled(!busy);
+              }
+
+              private void verifyKey(final String key) {
+                  if (keyBusy) return;
+                  keyBusy = true;
+                  setKeyBusy(true, "Memeriksa key…");
+                  new Thread(() -> {
+                      String result = "error";
+                      HttpURLConnection conn = null;
+                      try {
+                          conn = (HttpURLConnection) new URL(KEY_ENDPOINT).openConnection();
+                          conn.setRequestMethod("POST");
+                          conn.setConnectTimeout(12000);
+                          conn.setReadTimeout(15000);
+                          conn.setDoOutput(true);
+                          conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                          JSONObject body = new JSONObject();
+                          body.put("key", key);
+                          try (OutputStream os = conn.getOutputStream()) { os.write(body.toString().getBytes("UTF-8")); }
+                          int code = conn.getResponseCode();
+                          if (code == 200) result = "ok";
+                          else if (code == 401) result = "bad";
+                          else if (code == 429) result = "limit";
+                      } catch (Exception e) {
+                          android.util.Log.e("Web2APK", "Verifikasi key gagal", e);
+                      } finally {
+                          if (conn != null) conn.disconnect();
+                      }
+                      final String r = result;
+                      runOnUiThread(() -> onKeyResult(key, r));
+                  }).start();
+              }
+
+              private void onKeyResult(String key, String result) {
+                  keyBusy = false;
+                  if ("ok".equals(result)) {
+                      getSharedPreferences(KEY_PREFS, MODE_PRIVATE).edit().putString("key", key).apply();
+                      try {
+                          InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                          if (imm != null && keyInput != null) imm.hideSoftInputFromWindow(keyInput.getWindowToken(), 0);
+                      } catch (Exception ignored) { }
+                      if (keyGate != null) keyGate.setVisibility(View.GONE);
+                      startWeb();
+                      return;
+                  }
+                  if ("bad".equals(result)) {
+                      getSharedPreferences(KEY_PREFS, MODE_PRIVATE).edit().remove("key").apply();
+                      setKeyBusy(false, "Key salah atau sudah diganti. Masukkan key yang benar.");
+                  } else if ("limit".equals(result)) {
+                      setKeyBusy(false, "Terlalu banyak percobaan. Tunggu sebentar lalu coba lagi.");
+                  } else {
+                      setKeyBusy(false, "Tidak bisa terhubung ke server. Periksa internet lalu coba lagi.");
+                  }
+              }
+              // ===== Akhir gerbang key akses =====
+
               // ===== Watermark developer =====
               private static final String DEV_CREDIT = "Dev: Yasam | WA 6281519986005";
 
@@ -777,7 +945,7 @@ jobs:
                       final String finalReply = reply;
                       final boolean finalOk = ok;
                       runOnUiThread(() -> {
-                          pending.setText(finalReply);
+                          pending.setText(cleanMd(finalReply));
                           if (finalOk) {
                               aiHistory.add(new String[]{"assistant", finalReply});
                           } else if (!aiHistory.isEmpty()) {
@@ -800,6 +968,17 @@ jobs:
                   }
               }
               // ===== Akhir asisten AI =====
+
+              // Hapus sisa format markdown (**tebal**, # judul, `kode`) karena tampilan panel adalah teks biasa.
+              private String cleanMd(String t) {
+                  if (t == null) return "";
+                  t = t.replaceAll("(?m)^\\s{0,3}#{1,6}\\s*", "");
+                  t = t.replaceAll("(?m)^\\s*[*-]\\s+", "\u2022 ");
+                  t = t.replaceAll("(\\*{1,3}|_{2,3})(\\S(?:[^\\n]*?\\S)?)\\1", "$2");
+                  t = t.replaceAll("\\*{2,}", "");
+                  t = t.replace("`", "");
+                  return t.trim();
+              }
 
               // ===== Scan soal otomatis =====
               private static final String SOLVE_ENDPOINT = AI_ENDPOINT.endsWith("/chat")
@@ -942,10 +1121,10 @@ jobs:
               }
 
               private void addSolveCard(JSONObject it, int number) {
-                  final String q = it.optString("q", "");
+                  final String q = cleanMd(it.optString("q", ""));
                   final String type = it.optString("type", "mcq");
-                  final String answer = it.optString("answer", "").trim();
-                  final String note = it.optString("note", "").trim();
+                  final String answer = cleanMd(it.optString("answer", ""));
+                  final String note = cleanMd(it.optString("note", ""));
                   double conf = it.optDouble("confidence", 0);
                   JSONArray opts = it.optJSONArray("options");
                   if ((opts == null || opts.length() == 0) && "tf".equals(type)) {
@@ -974,7 +1153,7 @@ jobs:
                           JSONObject o = opts.optJSONObject(i);
                           if (o == null) continue;
                           final String key = o.optString("key", "");
-                          final String text = o.optString("text", "");
+                          final String text = cleanMd(o.optString("text", ""));
                           boolean suggested = !answer.isEmpty() && (answer.equalsIgnoreCase(key)
                                   || answer.equalsIgnoreCase(text)
                                   || (!key.isEmpty() && answer.toLowerCase().startsWith(key.toLowerCase() + ".")));
@@ -1279,12 +1458,13 @@ jobs:
                   if (webView != null) webView.saveState(outState);
               }
               @Override public void onBackPressed() {
+                  if (keyGate != null && keyGate.getVisibility() == View.VISIBLE) { finish(); return; }
                   if (aiPanel != null && aiPanel.getVisibility() == View.VISIBLE) { closeAssistant(); return; }
                   if (webView != null && webView.canGoBack()) webView.goBack();
                   else super.onBackPressed();
               }
           }
-          '''.replace("__PACKAGE__", pkg).replace("__URL__", os.environ["WEBSITE_URL"]).replace("__AI_ENDPOINT__", os.environ.get("AI_ENDPOINT", "")), encoding="utf-8")
+          '''.replace("__PACKAGE__", pkg).replace("__URL__", os.environ["WEBSITE_URL"]).replace("__AI_ENDPOINT__", os.environ.get("AI_ENDPOINT", "")).replace("__KEY_ENDPOINT__", os.environ.get("KEY_ENDPOINT", "")), encoding="utf-8")
           PY
 
           mkdir -p app/src/main/assets

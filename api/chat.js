@@ -11,7 +11,20 @@ const SYSTEM_PROMPT =
   'Kamu adalah asisten AI di dalam aplikasi Android. Jawab dalam bahasa yang dipakai pengguna ' +
   '(utamakan Bahasa Indonesia), singkat, jelas, dan akurat. Jika tidak yakin atau tidak tahu, ' +
   'katakan terus terang daripada menebak. Untuk soal hitungan atau logika, tunjukkan langkah ringkas ' +
-  'lalu berikan jawaban akhir.';
+  'lalu berikan jawaban akhir. Tulis teks biasa tanpa markdown: jangan memakai tanda bintang, pagar, ' +
+  'atau backtick; untuk daftar pakai nomor atau tanda hubung sederhana.';
+
+// Tampilan di aplikasi adalah teks biasa, jadi hapus sisa format markdown dari jawaban AI.
+function stripMarkdown(t) {
+  return String(t || '')
+    .replace(/```[a-z]*\n?/gi, '')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .replace(/^\s*[*-]\s+/gm, '• ')
+    .replace(/(\*{1,3}|_{2,3})(\S(?:[^\n]*?\S)?)\1/g, '$2')
+    .replace(/\*{2,}/g, '')
+    .replace(/`/g, '')
+    .trim();
+}
 
 function limited(ip) {
   const now = Date.now();
@@ -93,7 +106,7 @@ export default async function handler(req, res) {
         : 'Layanan AI sedang bermasalah. Coba lagi nanti.';
       return res.status(502).json({ error: msg });
     }
-    const reply = data?.choices?.[0]?.message?.content?.trim();
+    const reply = stripMarkdown(data?.choices?.[0]?.message?.content);
     if (!reply) return res.status(502).json({ error: 'AI tidak mengirim jawaban. Coba lagi.' });
     return res.status(200).json({ reply });
   } catch (err) {

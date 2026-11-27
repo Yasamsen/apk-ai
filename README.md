@@ -111,3 +111,15 @@ Jika asisten AI aktif, panel AI punya tombol **Scan soal** dan sakelar **Auto sc
 
 ## Tombol "Soal berikutnya"
 Panel AI punya tombol **Soal berikutnya →**. Satu ketukan menekan satu tombol lanjut di halaman (teks seperti Next/Selanjutnya/Berikutnya/Lanjut), lalu soal baru discan lagi jika Auto scan aktif. Pemilihan jawaban dan perpindahan soal tetap dilakukan pengguna satu per satu.
+
+## Key akses sebelum masuk aplikasi
+APK bisa meminta key sebelum WebView dibuka. Key diatur di Vercel, bukan di APK.
+
+- Tambahkan Environment Variable `APP_ACCESS_KEY` di Vercel (contoh: `rahasia123`). Untuk beberapa key sekaligus, pisahkan dengan koma: `key1,key2,key3`. Hapus satu key untuk mencabut aksesnya.
+- `KEY_ENDPOINT` (opsional) = URL penuh `https://domain-kamu.vercel.app/api/verify-key`. Jika kosong, diambil dari domain yang dipakai saat menekan Mulai Build.
+- **Redeploy Vercel, lalu build APK baru.** Gerbang key hanya ada di APK yang dibuild setelah `APP_ACCESS_KEY` terisi. Jika `APP_ACCESS_KEY` kosong saat build, APK langsung terbuka tanpa key.
+- Saat APK dibuka, pengguna mengisi key. Key yang benar disimpan di perangkat dan diperiksa ulang ke server setiap aplikasi dibuka, jadi mengganti `APP_ACCESS_KEY` di Vercel (cukup redeploy, tanpa build APK baru) membuat key lama tidak berlaku lagi.
+- Percobaan key salah dibatasi 8 kali per menit per IP (best-effort).
+- Perlu internet untuk memeriksa key. Tanpa koneksi, aplikasi tetap di layar key.
+- Matikan Deployment Protection untuk `/api/verify-key`, sama seperti `/api/chat`.
+- Batasan: ini gerbang di sisi aplikasi. Alamat website tujuan tetap ada di dalam APK, jadi orang yang membongkar APK masih bisa membuka website itu langsung. Jika website perlu benar-benar tertutup, pasang autentikasi di website tujuan.
