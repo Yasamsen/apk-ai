@@ -212,6 +212,7 @@ jobs:
               private TextRecognizer textRecognizer;
               private String unlockScript;
               private volatile boolean awaitingBlobOcr = false;
+              private boolean aiHidden = false;
               private final class BlobDownloadBridge {
                   @JavascriptInterface public void saveBlob(String dataUrl, String requestedName, String requestedMime) {
                       new Thread(() -> {
@@ -450,26 +451,39 @@ jobs:
                   final int fabSize = dp(56);
                   root.addView(fab, new FrameLayout.LayoutParams(fabSize, fabSize, Gravity.TOP | Gravity.START));
                   aiFab = fab;
+                  final android.content.SharedPreferences fabPrefs = getSharedPreferences("web2apk", MODE_PRIVATE);
+                  aiHidden = fabPrefs.getBoolean("ai_hidden", false);
+                  fab.setAlpha(aiHidden ? 0f : 1f); // transparan tapi tetap bisa disentuh
                   root.post(() -> {
-                      fab.setX(root.getWidth() - fabSize - dp(8));
-                      fab.setY(root.getHeight() * 0.65f);
+                      float sx = fabPrefs.getFloat("fab_x", -1f), sy = fabPrefs.getFloat("fab_y", -1f);
+                      if (sx >= 0 && sy >= 0) {
+                          fab.setX(Math.max(0, Math.min(root.getWidth() - fabSize, sx)));
+                          fab.setY(Math.max(0, Math.min(root.getHeight() - fabSize, sy)));
+                      } else {
+                          fab.setX(root.getWidth() - fabSize - dp(8));
+                          fab.setY(root.getHeight() * 0.65f);
+                      }
                   });
                   fab.setOnClickListener(v -> openAssistant());
                   final int slop = ViewConfiguration.get(this).getScaledTouchSlop();
                   fab.setOnTouchListener(new View.OnTouchListener() {
                       float downX, downY, startX, startY;
                       boolean dragging;
+                      boolean longPressed;
+                      final Runnable longRun = () -> { longPressed = true; setAiHidden(!aiHidden, true); };
                       @Override public boolean onTouch(View v, MotionEvent e) {
                           switch (e.getActionMasked()) {
                               case MotionEvent.ACTION_DOWN:
                                   downX = e.getRawX(); downY = e.getRawY();
                                   startX = v.getX(); startY = v.getY();
                                   dragging = false;
+                                  longPressed = false;
                                   v.animate().cancel();
+                                  v.postDelayed(longRun, ViewConfiguration.getLongPressTimeout());
                                   return true;
                               case MotionEvent.ACTION_MOVE: {
                                   float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
-                                  if (!dragging && Math.hypot(dx, dy) > slop) dragging = true;
+                                  if (!dragging && Math.hypot(dx, dy) > slop) { dragging = true; v.removeCallbacks(longRun); }
                                   if (dragging) {
                                       v.setX(Math.max(0, Math.min(root.getWidth() - v.getWidth(), startX + dx)));
                                       v.setY(Math.max(0, Math.min(root.getHeight() - v.getHeight(), startY + dy)));
@@ -477,15 +491,19 @@ jobs:
                                   return true;
                               }
                               case MotionEvent.ACTION_UP:
+                                  v.removeCallbacks(longRun);
+                                  if (longPressed) return true;
                                   if (dragging) {
                                       boolean left = v.getX() + v.getWidth() / 2f < root.getWidth() / 2f;
                                       float target = left ? dp(8) : root.getWidth() - v.getWidth() - dp(8);
                                       v.animate().x(target).setDuration(180).start();
+                                      fabPrefs.edit().putFloat("fab_x", target).putFloat("fab_y", v.getY()).apply();
                                   } else {
                                       v.performClick();
                                   }
                                   return true;
                               case MotionEvent.ACTION_CANCEL:
+                                  v.removeCallbacks(longRun);
                                   return true;
                           }
                           return false;
@@ -520,6 +538,12 @@ jobs:
                   clear.setTextColor(Color.parseColor("#A8B6CA"));
                   clear.setPadding(dp(12), dp(8), dp(12), dp(8));
                   clear.setOnClickListener(v -> resetChat());
+                  TextView hide = new TextView(this);
+                  hide.setText("Sembunyikan");
+                  hide.setTextColor(Color.parseColor("#A8B6CA"));
+                  hide.setPadding(dp(12), dp(8), dp(12), dp(8));
+                  hide.setOnClickListener(v -> { closeAssistant(); setAiHidden(true, true); });
+                  header.addView(hide);
                   header.addView(clear);
                   TextView close = new TextView(this);
                   close.setText("\u2715");
@@ -579,6 +603,15 @@ jobs:
                   });
 
                   resetChat();
+              }
+
+              private void setAiHidden(boolean hidden, boolean announce) {
+                  aiHidden = hidden;
+                  getSharedPreferences("web2apk", MODE_PRIVATE).edit().putBoolean("ai_hidden", hidden).apply();
+                  if (aiFab != null) aiFab.setAlpha(hidden ? 0f : 1f);
+                  if (announce) toast(hidden
+                          ? "Tombol AI disembunyikan. Ketuk di tempatnya untuk membuka, tekan lama untuk menampilkan."
+                          : "Tombol AI ditampilkan");
               }
 
               private void resetChat() {
