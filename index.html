@@ -16,7 +16,12 @@
     <p class="intro">Buat aplikasi Android ringan dari website HTTPS. Proses build berjalan di GitHub Actions.</p>
     <form id="buildForm">
       <label for="url">URL website</label>
-      <input id="url" name="url" type="url" placeholder="https://contoh.com" required>
+      <div class="row">
+        <input id="url" name="url" type="url" placeholder="https://contoh.com" required>
+        <button id="scanBtn" type="button" class="secondary">Scan</button>
+      </div>
+      <p class="hint">Ketuk Scan untuk membaca nama, ikon, dan warna website secara otomatis.</p>
+      <section id="scanResult" class="scan" hidden aria-live="polite"></section>
       <label for="appName">Nama aplikasi</label>
       <input id="appName" name="appName" maxlength="40" placeholder="Aplikasi Saya" required>
       <label for="packageName">Package ID</label>
@@ -28,8 +33,8 @@
       <label for="iconUrl">Atau URL ikon (opsional)</label>
       <input id="iconUrl" name="iconUrl" type="url" placeholder="https://contoh.com/ikon.png">
       <p class="hint">Jika upload dan URL sama-sama diisi, file upload akan dipakai.</p>
-      <label class="check" for="aiEnabled"><input id="aiEnabled" name="aiEnabled" type="checkbox" checked> Tambahkan asisten AI melayang (GPT)</label>
-      <p class="hint">Muncul tombol "AI" yang bisa digeser. Ketuk untuk membuka kolom tanya jawab. Perlu OPENAI_API_KEY di Vercel.</p>
+      <label class="check" for="aiEnabled"><input id="aiEnabled" name="aiEnabled" type="checkbox" checked> Tambahkan asisten AI melayang</label>
+      <p class="hint">Muncul tombol "AI" yang bisa digeser. Ketuk untuk membuka kolom tanya jawab. Perlu GEMINI_API_KEY atau OPENAI_API_KEY di Vercel.</p>
       <button id="submit" type="submit">Mulai Build APK</button>
     </form>
     <section id="status" class="status" hidden aria-live="polite"></section>

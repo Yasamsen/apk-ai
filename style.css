@@ -35,3 +35,25 @@ input[type="file"]{padding:10px;font-size:13px}input[type="file"]::file-selector
 .status .detail-link{font-size:12px;text-align:center}
 
 .check{display:flex;align-items:center;gap:10px;font-weight:700}.check input{width:auto;padding:0;margin:0;accent-color:var(--accent)}
+
+/* ===== Scan website ===== */
+.row{display:flex;gap:8px;align-items:stretch}
+.row input{flex:1;min-width:0}
+button.secondary{margin-top:0;padding:0 18px;background:#26354c;color:var(--text);flex:none}
+.scan{border:1px solid var(--line);background:#0a1221;border-radius:14px;padding:14px;display:grid;gap:10px;overflow-wrap:anywhere}
+.scan p{margin:0}
+.scan-head{display:flex;gap:12px;align-items:center}
+.scan-icon{width:56px;height:56px;border-radius:14px;background:#fff;object-fit:contain;flex:none;border:1px solid var(--line)}
+.scan-icon.empty{display:grid;place-items:center;background:var(--accent);color:#05281d;font-weight:900;font-size:13px}
+.scan-info{display:flex;flex-direction:column;min-width:0}
+.scan-info strong{font-size:16px}
+.scan-info .meta{color:var(--muted);font-size:12px}
+.scan-desc{color:var(--muted);font-size:13px;line-height:1.5}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--muted)}
+.chip.ok{color:var(--accent);border-color:rgba(87,211,165,.4)}
+.swatch{width:12px;height:12px;border-radius:50%;border:1px solid rgba(255,255,255,.35);display:inline-block}
+.scan-filled{font-size:12px;color:var(--accent)}
+.scan-error{color:#ff9b9b;font-size:13px}
+.scan button.secondary{padding:10px 14px;font-size:13px;justify-self:start}
+.scan[hidden]{display:none}

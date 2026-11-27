@@ -178,3 +178,112 @@ async function readAndShrinkIcon(file) {
   if (compact.length > 45000) throw new Error('Ikon masih terlalu besar setelah diperkecil. Coba gambar yang lebih sederhana.');
   return compact;
 }
+
+
+// ===== Scan website: baca nama, ikon, dan warna situs untuk pratinjau + isi otomatis =====
+const scanBtn = document.querySelector('#scanBtn');
+const scanBox = document.querySelector('#scanResult');
+const urlInput = document.querySelector('#url');
+const nameInput = document.querySelector('#appName');
+const packageInput = document.querySelector('#packageName');
+const iconUrlInput = document.querySelector('#iconUrl');
+const DEFAULT_PACKAGE = 'com.example.webapp';
+
+function safeColor(value) {
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value || '') ? value : '';
+}
+
+function applyScan(data, force) {
+  const filled = [];
+  if (data.appName && (force || !nameInput.value.trim())) {
+    nameInput.value = data.appName.slice(0, 40);
+    filled.push('nama');
+  }
+  if (data.suggestedPackage && (force || !packageInput.value.trim() || packageInput.value.trim() === DEFAULT_PACKAGE)) {
+    packageInput.value = data.suggestedPackage;
+    filled.push('package ID');
+  }
+  const hasUpload = document.querySelector('#iconFile').files.length > 0;
+  if (data.icon && data.iconUsable && !hasUpload && (force || !iconUrlInput.value.trim())) {
+    iconUrlInput.value = data.icon;
+    filled.push('ikon');
+  }
+  return filled;
+}
+
+function renderScan(data) {
+  scanBox.replaceChildren();
+
+  const head = el('div', 'scan-head');
+  if (data.icon) {
+    const img = el('img', 'scan-icon');
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    img.src = data.icon;
+    img.addEventListener('error', () => {
+      const fallback = el('div', 'scan-icon empty', 'APK');
+      img.replaceWith(fallback);
+    });
+    head.append(img);
+  } else {
+    head.append(el('div', 'scan-icon empty', 'APK'));
+  }
+  const info = el('div', 'scan-info');
+  info.append(el('strong', '', data.appName || data.title || data.host), el('span', 'meta', data.host));
+  head.append(info);
+  scanBox.append(head);
+
+  if (data.description) scanBox.append(el('p', 'scan-desc', data.description));
+
+  const chips = el('div', 'chips');
+  const color = safeColor(data.themeColor);
+  if (color) {
+    const chip = el('span', 'chip');
+    const sw = el('span', 'swatch');
+    sw.style.background = color;
+    chip.append(sw, document.createTextNode('Warna tema ' + color));
+    chips.append(chip);
+  }
+  chips.append(el('span', data.hasManifest ? 'chip ok' : 'chip', data.hasManifest ? 'Manifest web ditemukan' : 'Tanpa manifest web'));
+  if (data.icon && !data.iconUsable) chips.append(el('span', 'chip', 'Ikon bukan PNG/JPG, unggah ikon sendiri'));
+  if (!data.icon) chips.append(el('span', 'chip', 'Ikon tidak ditemukan'));
+  scanBox.append(chips);
+
+  const filled = applyScan(data, false);
+  if (filled.length) scanBox.append(el('p', 'scan-filled', '✓ Terisi otomatis: ' + filled.join(', ')));
+
+  const again = el('button', 'secondary', 'Pakai semua hasil scan');
+  again.type = 'button';
+  again.addEventListener('click', () => {
+    const done = applyScan(data, true);
+    scanBox.querySelector('.scan-filled')?.remove();
+    scanBox.insertBefore(el('p', 'scan-filled', '✓ Diterapkan: ' + (done.join(', ') || 'tidak ada perubahan')), again);
+  });
+  scanBox.append(again);
+}
+
+async function scanSite() {
+  const raw = urlInput.value.trim();
+  scanBox.hidden = false;
+  if (!raw) {
+    scanBox.replaceChildren(el('p', 'scan-error', 'Masukkan URL website terlebih dahulu.'));
+    urlInput.focus();
+    return;
+  }
+  scanBtn.disabled = true;
+  scanBtn.textContent = 'Memindai…';
+  scanBox.replaceChildren(el('p', 'hint', 'Memindai website…'));
+  try {
+    const response = await fetch('/api/scan?url=' + encodeURIComponent(raw), { cache: 'no-store' });
+    const data = await readApiResponse(response, '/api/scan');
+    if (!response.ok) throw new Error(data.error || 'Gagal memindai website.');
+    renderScan(data);
+  } catch (error) {
+    scanBox.replaceChildren(el('p', 'scan-error', error.message || 'Gagal memindai website.'));
+  } finally {
+    scanBtn.disabled = false;
+    scanBtn.textContent = 'Scan';
+  }
+}
+
+scanBtn.addEventListener('click', scanSite);

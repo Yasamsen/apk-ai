@@ -76,3 +76,6 @@ Catatan keamanan dan biaya: siapa pun yang memasang APK bisa memakai endpoint in
 Jika `GEMINI_API_KEY` diisi di Environment Variables Vercel, `/api/chat` otomatis memakai Gemini (endpoint kompatibel OpenAI) dan mengabaikan `OPENAI_API_KEY`.
 - `GEMINI_API_KEY` = API key dari https://aistudio.google.com/apikey
 - `GEMINI_MODEL` (opsional) = nama model, bawaan `gemini-flash-latest`.
+
+### Scan website
+Tombol **Scan** di samping kolom URL memanggil `/api/scan`, yang membaca halaman HTTPS publik (judul, manifest web, ikon, warna tema) lalu menampilkan pratinjau dan mengisi nama aplikasi, package ID, dan URL ikon secara otomatis jika masih kosong. Alamat internal/privat (localhost, 10.x, 192.168.x, 169.254.x, dll.) diblokir. Hanya ikon PNG/JPG yang diisi otomatis; ikon lain (ICO/SVG) perlu diunggah manual.
