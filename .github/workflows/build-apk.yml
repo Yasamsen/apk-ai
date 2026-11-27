@@ -1452,9 +1452,52 @@ jobs:
               return hit;
             }
 
+            // Cari kontrol asli (radio/checkbox) untuk baris opsi; banyak situs memakai bulatan kustom.
+            function controlFor(el) {
+              if (el.tagName === 'INPUT') return el;
+              var n = el;
+              for (var i = 0; i < 4 && n; i++, n = n.parentElement) {
+                var c = n.querySelectorAll('input[type=radio],input[type=checkbox],[role=radio],[role=checkbox]');
+                if (c.length === 1) return c[0];
+                if (c.length > 1) break;
+              }
+              return null;
+            }
+
+            function isChecked(c) {
+              if (!c) return false;
+              if (c.tagName === 'INPUT') return !!c.checked;
+              return c.getAttribute('aria-checked') === 'true';
+            }
+
+            function fireClick(el) {
+              var types = ['pointerdown', 'mousedown', 'pointerup', 'mouseup'];
+              for (var i = 0; i < types.length; i++) {
+                try {
+                  var Ctor = (types[i].indexOf('pointer') === 0 && window.PointerEvent) ? PointerEvent : MouseEvent;
+                  el.dispatchEvent(new Ctor(types[i], { bubbles: true, cancelable: true, view: window }));
+                } catch (e) {}
+              }
+              try { el.click(); } catch (e) {}
+            }
+
             function activate(el) {
               try { el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) {}
-              try { el.click(); } catch (e) {}
+              var ctl = controlFor(el);
+              var target = ctl || el;
+              if (!isChecked(ctl)) {
+                fireClick(target);
+                // Belum terpilih? coba lewat teks/baris opsinya.
+                if (ctl && !isChecked(ctl) && target !== el) fireClick(el);
+                // Pilihan terakhir untuk input asli: set langsung + beri tahu framework.
+                if (ctl && ctl.tagName === 'INPUT' && !ctl.checked) {
+                  try {
+                    ctl.checked = true;
+                    ctl.dispatchEvent(new Event('input', { bubbles: true }));
+                    ctl.dispatchEvent(new Event('change', { bubbles: true }));
+                  } catch (e) {}
+                }
+              }
               var old = el.style.outline;
               el.style.outline = '3px solid #57d3a5';
               setTimeout(function () { el.style.outline = old; }, 1600);
